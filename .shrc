@@ -1,0 +1,322 @@
+# Source global definitions
+if [ -f /etc/shrc ]; then
+    . /etc/shrc
+fi
+	
+# parse whatever follows in
+# interactive mode only
+case "$-" in
+	*i*) 
+	#--- general settings --- 
+	# 755 file perms
+	umask 022
+	# no core dumps
+	ulimit -c 0
+	# initialize terminal
+	eval `tset -m ansi:ansi -m $TERM:\${TERM:-ansi} -s -Q`
+	# don't get fancy if we have a dumb terminal
+	[ $TERM = 'dumb' ] && return 0
+	# control flow bindings
+	stty hupcl ixon ixoff -parity
+	stty erase "^H" kill "^U" intr "^C" eof "^D"
+	# If job control is enabled, set the suspend character
+	# to (control-z):
+	case $- in
+	  *m*) stty susp '^z'
+	  ;;
+	esac 
+	# colums and tab stops
+	#stty cols 80
+	tabs -8
+	#--- shell options ---	
+	# vi mode
+	set -o vi
+	# don't overwrite files with “>"
+	set -o noclobber
+	# PS command substitions
+	set -o promptcmds
+	# print pwd when changed 
+	set -o cdprint
+	# export variables
+	set -o allexport
+	# filename completions 
+	set -o tabcomplete
+	# disable nounset
+	set +u 
+	#--- limits (pub unix only)
+	# # files < 512mb
+	# ulimit -f 512000
+	# # max 250 file descriptors
+	# ulimit -S -n 250
+	# # max 50 processes
+	# ulimit -S -p 50
+	# # softlimit 250mb virtual memory
+	# ulimit -S -v 250000
+	#--- environmental variables ---
+	#- (also set ENV="~/.shrc" inside ~/.profile) 
+	# host
+	hup(){ (read pid; kill -HUP $pid) </var/run/$1.pid; }
+	case "$-" in *i*)
+	    if /bin/test -z "${HOST}"; then
+	        HOST="$(hostname)"
+	    fi
+	;;
+	esac  
+	# shell
+	SHELL=/bin/sh
+	# PS1
+	PS1="`hostname | sed 's/\..*//'`"
+	   case `id -u` in
+	     0) PS1="${PS1}:~ # ";;
+	     *) PS1="${PS1}:~ $ ";;
+	   esac
+	# PS2
+	PS2='>> '
+	# history settings
+	if [ -d ~/.history ]; then
+	  HISTFILE=~/.history/hist.$(tty | sed 's;.*/;;')
+          trap 'rm -f $HISTFILE' EXIT
+	else
+	  HISTFILE=~/.history
+	fi
+	HISTSIZE=1000000
+	# editline settings
+	EDITRC="$HOME/.editrc" 
+	# path
+	if [ `id -u` = 0 ]; then
+		PATH=/usr/pkg/sbin:/usr/sbin:/sbin:$PATH
+	 else
+		PATH=/bin:/usr/bin:/usr/X11R7/bin:/usr/pkg/bin:/usr/local/bin
+		PATH=$PATH:/usr/games:/usr/pkg/java/openjdk8/bin:$HOME/.bin
+	fi
+	# pager settings
+	LESS="-ci -P \spacebar\:page ahead b\:page back /\:search ahead \?\:search back h\:help q\:quit"
+	# use most?
+	#if [ -x /usr/pkg/bin/most ]; then
+	#   PAGER='/usr/pkg/bin/most -ds'; export PAGER
+	#   else
+	#    PAGER="less"; export PAGER
+	#fi
+	PAGER=less
+	LESSOPEN="|lesspipe.sh %s"
+	LESSCLOSE="lessclose.sh %s %s"
+	# colored output (other BSDs) 
+	CLICOLOR=yes
+	if [ "$TERM" = cons25 ]; then
+		LSCOLORS="AxHxcxdxhxefgxAHahBxbx"
+	  else
+		LSCOLORS="hxHxcxdxAxefgxAHahBxbx"
+	fi
+	# encoding
+	LANG="en_US.UTF-8"
+	LC_CTYPE="en_US.UTF-8"
+	CONFIG_CHARSET=UTF-8
+	# user settings
+	USER=$(id -un)
+	UID=$(id -u)
+	GROUP=$(id -ng $USER)
+	TZ="Europe/Rome"
+	CDPATH=.:$HOME:/usr/pkg
+	MAIL=/var/mail/${LOGNAME}
+	MAILCHECK=1
+	PAPERSIZE=A4                                                                                                                 
+	BLOCKSIZE=1m 
+	GZIP=-9
+	GREP_OPTIONS='-d skip'
+	TERM=xterm-256color
+	EDITOR=vi
+	VISUAL=${EDITOR}
+	COLORTERM=${TERM}
+	XDG_RUNTIME_DIR=/tmp/${LOGNAME}
+	TMPDIR=/tmp/${LOGNAME}
+	BROWSER=lynx
+	NNTPSERVER="news://tilde.pink"
+	CVS_RSH=ssh
+	#--- shell functions ---
+	# read config
+	r() {
+		exec $SHELL $HOME/.shrc
+	}
+	# verbose folder listing
+	dir() {
+		ls -l | awk '{ if ( substr($1,1,1)== "d") {print}}'
+	}
+	# make dir and go to it 
+	md() {
+		command mkdir -p $1 && cd $1
+	}
+	# save to dir stack
+	pushd() {
+	       dirname=$1
+	       cd ${dirname:?"Missing directory name."}
+	       DIRSTACK="$PWD ${DIRSTACK:-$OLDPWD}"
+	       printf "$DIRSTACK"
+	}
+	# change wkrd to top of dir stack
+	popd() {
+	       DIRSTACK=${DIRSTACK#* }
+	       cd ${DIRSTACK%% *}
+	       printf "$PWD"
+	}
+        q () {
+	       printf '%s' "$d" | sed -Ee "s/'/'\\\\''/g; 1s/^/'/; \$s/\$/'/"
+	}
+        # change dir interectively
+	# courtesy of @rvp at UnitedBSD
+	ch ()
+	{
+		local arg dirs d i
+	
+	# short-circuit
+	if [ $# -eq 0 ]
+	then	cd
+		return
+	fi
+
+	arg="$1"
+	for d in $(printf '%s' "$arg" | sed -Ee 's/[^/]+/&*/g')
+	do	test -d "$d" || continue
+		dirs="$dirs $(q $d)"
+	done
+
+	eval "set -- $dirs"
+
+	# no match
+	if [ $# -eq 0 ]
+	then	printf 1>&2 '%s: %s: no match\n' "$0" "$arg"
+		return 1
+	fi
+
+	# single match
+	if [ $# -eq 1 ]
+	then	cd "$1"
+		return
+	fi
+
+	# multiple matches
+	i=0
+	for d
+	do	i=$((i + 1))
+		printf '%d) %s\n' "$i" "$d"
+	done
+	printf '%s\n? ' '-----'
+	read num
+
+	# do nothing if no number
+	if [ "$num" = "" ]
+	then	return 0
+	fi
+
+	# invalid number
+	if [ "$num" -lt 1 -o "$num" -gt $# ]
+	then	printf 1>&2 '%s: %s: bad number\n' "$0" "$num"
+		return 1
+	fi
+
+	eval "cd \"\${$num}\""
+   }
+	# show history	
+	h() { 
+		fc -l 1 | sort | uniq; 
+	} 
+	# clear buffer
+	empty() { 
+		echo $'\e[3J'; 
+	}
+        # remove wrkdir, if empty
+	rd() {
+		dir=$PWD
+		cd ..
+		if command rmdir "$dir" 2>/dev/null; then
+		 echo 'Removed empty directory:' $dir
+		else
+		 cd "$dir"
+		 echo 'Directory is not empty:'
+		 ls -A
+		fi
+		unset dir
+	}
+	# remove backup files in the wrkdir
+	clean() {
+		find . -name \( -name "*.old" -o -name "*.bak" \) -exec rm :{} \;
+		find . -size 0 -exec rm {} \;
+	}
+	# send SIGKILL
+	stop() { 
+		kill -9 "${@:-%%}"; 
+	}
+        # show pid
+	pid() {
+		 ps -e | grep $@ | cut -d" " -f1;
+	}	 
+	# move to a dotfile	
+	dot() { 
+		for file in "$@"; 
+		  do mv -iv "$file" ."$file"; 
+	    done 
+	}
+        # backup files	
+	bck() { 
+		for file in "$@"; 
+		  do cp -iv "$file" "$file".bak; 
+		done 
+	}
+	# launch tmux
+	tm() {
+		if (( $# )); then
+		  tmux has-session -t "$*" && tmux attach -t "$*" || tmux new-session -s "$*"
+		else
+		  tmux attach || tmux new-session -s default
+		fi
+	}
+	# export tmux session 
+	tmup() {
+		[ -n $TMUX ] && export $(tmux showenv | grep --color=never '^[^-]' | xargs)
+	}
+	#--- aliases ---	
+	alias t='task'
+	alias tf='task -f'
+	alias tn='task | head -n 1'
+	alias pu='ps -fu $USER'
+	alias j='jobs'
+	alias 1='fg %1'
+	alias 2='fg %2'
+	alias 3='fg %3'
+	alias m='$PAGER'
+	alias lv='ls -laFo'
+	alias l='ls -l'
+	alias la='ls -aF'
+	alias g='egrep -i'
+	alias lgrep="ls | egrep -i "
+	alias llgrep="ls -l | egrep -i "
+	alias cdl='cd $* && ls'
+	alias cp='cp -ip'
+	alias mv='mv -iv'
+	alias rm='rm -i'
+	alias ls='ls -F'
+	alias df='df -hk'
+	alias du='du -hk'
+	alias rsz='eval $(resize)'
+	alias cls='tput clear'
+	alias sane='stty sane'
+	alias realpath='readlink -f'
+	alias cal='cal -3'
+	alias dos2unix="tr -d '\r'"
+	#--- login scripts (for remote shell) 
+	# mailbox notifications
+	if [ -x /usr/bin/biff ]; then
+	 biff y 2> /dev/null
+	fi
+	# give a fortune cookie and the current date/time on login
+	[ -x /usr/games/fortune ] && /usr/games/fortune -aes
+	echo ''
+	# display current date
+	echo ''; echo -n 'To days date is: '; date
+	# lauch tmux by default
+	if command -v tmux &> /dev/null && [ -z "$TMUX" ]; then
+          tmux attach -t default || tmux new -s default
+	fi
+	;;
+*)
+;;
+esac
